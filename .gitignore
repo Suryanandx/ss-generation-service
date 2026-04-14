@@ -1,0 +1,10 @@
+*
+!.gitignore
+!README.md
+!generation-service/
+!generation-service/**
+generation-service/node_modules/
+generation-service/dist/
+generation-service/.env
+generation-service/.env.*
+!generation-service/.env.example
