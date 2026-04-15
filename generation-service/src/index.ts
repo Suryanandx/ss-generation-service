@@ -15,7 +15,7 @@ function requireServiceAuth(authHeader?: string) {
 }
 
 app.addHook("onRequest", async (req, reply) => {
-  if (req.url.startsWith("/health")) return;
+  if (req.url.startsWith("/health") || req.url.startsWith("/ready")) return;
   if (!requireServiceAuth(req.headers.authorization)) {
     return reply.code(401).send({ error: "Unauthorized" });
   }

@@ -2,6 +2,10 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+function trimTrailingSlashes(url: string) {
+  return url.replace(/\/+$/, "");
+}
+
 export const config = {
   port: Number(process.env.PORT || 4040),
   host: process.env.HOST || "0.0.0.0",
@@ -18,7 +22,9 @@ export const config = {
     process.env.GEN_DATABASE_URL ||
     process.env.KPOP_PRISMA_DATABASE_URL ||
     "",
-  dashboardBaseUrl: process.env.DASHBOARD_BASE_URL || "http://127.0.0.1:3001",
+  dashboardBaseUrl: trimTrailingSlashes(
+    process.env.DASHBOARD_BASE_URL || "http://127.0.0.1:3001"
+  ),
   workerToken: process.env.GEN_WORKER_TOKEN || "",
   recoverySweepMinMs: Math.max(5000, Number(process.env.RECOVERY_SWEEP_MIN_MS || 15000)),
   recoverySweepMaxMs: Math.max(30000, Number(process.env.RECOVERY_SWEEP_MAX_MS || 300000)),

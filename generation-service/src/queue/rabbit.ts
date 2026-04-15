@@ -5,14 +5,47 @@ import type { AppEvent, QueueJobPayload } from "../types.js";
 
 let connection: ChannelModel | null = null;
 let channel: Channel | null = null;
+let connectingPromise: Promise<Channel> | null = null;
+
+function resetRabbitState() {
+  channel = null;
+  connection = null;
+}
 
 export async function getRabbitChannel() {
   if (channel) return channel;
-  connection = await amqp.connect(config.rabbitUrl);
-  const nextChannel = await connection.createChannel();
-  await ensureQueueTopology(nextChannel);
-  channel = nextChannel;
-  return nextChannel;
+  if (connectingPromise) return connectingPromise;
+
+  connectingPromise = (async () => {
+    const conn = await amqp.connect(config.rabbitUrl);
+    conn.on("error", () => {
+      // Prevent unhandled 'error' events from crashing the process.
+      resetRabbitState();
+    });
+    conn.on("close", () => {
+      resetRabbitState();
+    });
+
+    const nextChannel = await conn.createChannel();
+    nextChannel.on("error", () => {
+      // Channel errors should invalidate current state for lazy reconnect.
+      resetRabbitState();
+    });
+    nextChannel.on("close", () => {
+      resetRabbitState();
+    });
+
+    await ensureQueueTopology(nextChannel);
+    connection = conn;
+    channel = nextChannel;
+    return nextChannel;
+  })();
+
+  try {
+    return await connectingPromise;
+  } finally {
+    connectingPromise = null;
+  }
 }
 
 export async function publishJob(routingKey: "job.base" | "job.pose", payload: QueueJobPayload) {
