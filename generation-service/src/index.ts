@@ -5,7 +5,7 @@ import { startQueueWorkers } from "./queue/worker.js";
 import { registerApiRoutes } from "./api/routes.js";
 import type { QueueJobPayload } from "./types.js";
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, bodyLimit: 25 * 1024 * 1024 }); // 25 MB — base64 images can be 5–15 MB
 let lastDashboardWorkerActivityAt = 0;
 
 function requireServiceAuth(authHeader?: string) {

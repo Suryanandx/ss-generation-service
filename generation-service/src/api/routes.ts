@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { publishJob } from "../queue/rabbit.js";
+import { registerSeedanceRoutes } from "./seedance.js";
 import type { QueueJobPayload } from "../types.js";
 
 export async function registerApiRoutes(app: FastifyInstance) {
+  await registerSeedanceRoutes(app);
   const baseSchema = z.object({
     batchId: z.string().min(1),
     jobId: z.string().min(1),
