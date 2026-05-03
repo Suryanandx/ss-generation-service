@@ -208,7 +208,37 @@ export async function registerSeedanceRoutes(app: FastifyInstance) {
     }
   });
 
-  // SSE: polls MuAPI every 2s and streams state events until COMPLETED or FAILED
+  // Single-shot poll: returns current MuAPI status as plain JSON.
+  // Use this for client-driven polling and recovery — does not enforce a wall-clock
+  // deadline, so a job that runs longer than the SSE window can still be retrieved.
+  app.get("/v1/seedance/result/:requestId", async (req, reply) => {
+    const apiKey = getMuapiKey();
+    if (!apiKey) return reply.code(500).send({ error: "MUAPI_API_KEY not configured" });
+
+    const { requestId } = req.params as { requestId: string };
+    if (!requestId) return reply.code(400).send({ error: "requestId required" });
+
+    try {
+      const data = await pollMuapi(requestId, apiKey);
+      const state = muapiStateToInternal(String(data.status || ""));
+      const outputUrl = extractOutputUrl(data);
+      const progress = typeof data.progress === "number" ? data.progress : undefined;
+      const error = state === "FAILED"
+        ? String(data.error || data.message || data.detail || "Generation failed")
+        : undefined;
+      return reply.send({ state, outputUrl: outputUrl ?? null, progress, error });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Poll error";
+      // 502 so the caller can decide whether to retry — never report a transient
+      // network blip as FAILED.
+      return reply.code(502).send({ state: "POLL_ERROR", error: message });
+    }
+  });
+
+  // SSE: polls MuAPI every 2s and streams state events until COMPLETED, FAILED,
+  // or the connection is closed. The wall-clock cap is generous because some
+  // models (Seedance 2 long durations, Veo) can take 10+ minutes; on timeout
+  // we close the stream WITHOUT sending FAILED so the caller can re-poll.
   app.get("/v1/seedance/status/:requestId", async (req, reply) => {
     const apiKey = getMuapiKey();
     if (!apiKey) return reply.code(500).send({ error: "MUAPI_API_KEY not configured" });
@@ -228,11 +258,10 @@ export async function registerSeedanceRoutes(app: FastifyInstance) {
       try { reply.raw.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* closed */ }
     };
 
-    const MAX_ATTEMPTS = 150; // 5 min at 2s interval
+    const MAX_ATTEMPTS = 1200; // 40 min at 2s — safely covers Seedance 2 / Veo long runs
     const INTERVAL_MS = 2000;
-    const MAX_CONSECUTIVE_ERRORS = 5;
+    const MAX_CONSECUTIVE_ERRORS = 10;
     let consecutiveErrors = 0;
-    let timedOut = false;
 
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       if (req.raw.destroyed) break;
@@ -259,12 +288,12 @@ export async function registerSeedanceRoutes(app: FastifyInstance) {
         const errMsg = err instanceof Error ? err.message : "Poll error";
         send({ state: "POLL_ERROR", error: errMsg });
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-          send({ state: "FAILED", error: `Polling failed after ${MAX_CONSECUTIVE_ERRORS} consecutive errors: ${errMsg}` });
+          // Network errors are transient — close the stream as RUNNING so the
+          // caller polls again on the single-shot endpoint instead of giving up.
+          send({ state: "RUNNING", note: `transient errors: ${errMsg}` });
           break;
         }
       }
-
-      if (i === MAX_ATTEMPTS - 1) timedOut = true;
 
       await new Promise<void>((r) => {
         const t = setTimeout(r, INTERVAL_MS);
@@ -272,10 +301,8 @@ export async function registerSeedanceRoutes(app: FastifyInstance) {
       });
     }
 
-    if (timedOut && !req.raw.destroyed) {
-      send({ state: "FAILED", error: "Generation timed out after 5 minutes" });
-    }
-
+    // No FAILED-on-timeout: callers must use /v1/seedance/result/:requestId to
+    // recover jobs that exceed the SSE window.
     if (!reply.raw.destroyed) reply.raw.end();
     return reply;
   });
