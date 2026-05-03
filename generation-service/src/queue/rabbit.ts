@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { ensureQueueTopology } from "./topology.js";
 import type { AppEvent, QueueJobPayload } from "../types.js";
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- reset in resetRabbitState
 let connection: ChannelModel | null = null;
 let channel: Channel | null = null;
 let connectingPromise: Promise<Channel> | null = null;
